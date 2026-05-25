@@ -812,7 +812,7 @@
 // ════════════════════════════════════════════
 // GAS API BRIDGE — ยิงตรงไป GAS Web App
 // ════════════════════════════════════════════
-const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbw4qkcrNPfdlY7UfNxG-5sGfISXmaO_RN2kWC6VvyNfuNCBNKS21agvoAgyoa7xKmci/exec';
+const GAS_API_URL = 'https://script.google.com/macros/s/AKfycby14tcLHyulJ7roN2f2XJIszM58la4e5PhQa4G22g9bO-bPrYAEWtlmyd0iZtMTZmsMrw/exec';
 
 // ════════════════════════════════════════════
 // GAS BRIDGE — แก้ปัญหา CORS โดยใช้:
@@ -820,24 +820,36 @@ const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbw4qkcrNPfdlY7UfNxG
 //   • no-cors form POST → สำหรับ WRITE (บันทึก) ผ่าน GAS doPost
 // ════════════════════════════════════════════
 
-// --- JSONP helper (GET, อ่านข้อมูล) ---
+// --- fetch GET helper (อ่านข้อมูล — ใช้ fetch แทน JSONP) ---
 function gasGet(action, payload, onSuccess, onError) {
-  const cbName = '_gasCB_' + Date.now() + '_' + Math.random().toString(36).slice(2);
-  window[cbName] = function(data) {
-    delete window[cbName];
-    document.getElementById(cbName) && document.getElementById(cbName).remove();
-    onSuccess(data);
-  };
-  const params = new URLSearchParams({ action, payload: JSON.stringify(payload || {}), callback: cbName });
-  const script = document.createElement('script');
-  script.id = cbName;
-  script.src = GAS_API_URL + '?' + params.toString();
-  script.onerror = function() {
-    delete window[cbName];
-    script.remove();
-    if (onError) onError(new Error('JSONP failed'));
-  };
-  document.head.appendChild(script);
+  const params = new URLSearchParams({ action, payload: JSON.stringify(payload || {}) });
+  fetch(GAS_API_URL + '?' + params.toString())
+    .then(r => r.json())
+    .then(data => onSuccess(data))
+    .catch(err => {
+      // fallback: ลอง JSONP ถ้า fetch ไม่ได้
+      const cbName = '_gasCB_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      let done = false;
+      const timer = setTimeout(() => {
+        if (done) return; done = true;
+        delete window[cbName];
+        const el = document.getElementById(cbName); if (el) el.remove();
+        if (onError) onError(new Error('timeout'));
+      }, 10000);
+      window[cbName] = function(data) {
+        if (done) return; done = true;
+        clearTimeout(timer);
+        delete window[cbName];
+        const el = document.getElementById(cbName); if (el) el.remove();
+        onSuccess(data);
+      };
+      const p2 = new URLSearchParams({ action, payload: JSON.stringify(payload || {}), callback: cbName });
+      const script = document.createElement('script');
+      script.id = cbName;
+      script.src = GAS_API_URL + '?' + p2.toString();
+      script.onerror = () => { clearTimeout(timer); if (!done) { done=true; if(onError) onError(err); } };
+      document.head.appendChild(script);
+    });
 }
 
 // --- fetch POST helper (เขียนข้อมูล — GAS รองรับ no-cors) ---
