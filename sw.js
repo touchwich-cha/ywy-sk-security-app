@@ -1,19 +1,15 @@
-const CACHE_NAME = 'security-ywy-v1';
+const CACHE_NAME = 'security-ywy-v2';
 const ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/icon-192.png',
-  '/icon-512.png',
-  'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css',
-  'https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.all.min.js'
+  '/icon-512.png'
 ];
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      return cache.addAll(ASSETS).catch(() => {});
-    })
+    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS).catch(() => {}))
   );
   self.skipWaiting();
 });
@@ -28,15 +24,27 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // ไม่ cache GAS API requests
-  if (e.request.url.includes('script.google.com')) return;
-  
+  const url = e.request.url;
+
+  // ❌ ข้ามทุก request ที่ไม่ใช่ http/https (chrome-extension, data:, etc.)
+  if (!url.startsWith('http')) return;
+
+  // ❌ ไม่ cache GAS / Google APIs
+  if (url.includes('script.google.com') || url.includes('googleapis.com')) return;
+
+  // ❌ ไม่ cache CDN (โหลดสดดีกว่า)
+  if (url.includes('cdnjs.cloudflare.com') || url.includes('jsdelivr.net') || url.includes('fonts.googleapis.com')) return;
+
   e.respondWith(
     caches.match(e.request).then(cached => {
       return cached || fetch(e.request).then(res => {
-        if (!res || res.status !== 200 || res.type !== 'basic') return res;
-        const clone = res.clone();
-        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+        // cache เฉพาะ response ที่ ok และเป็น basic (same-origin)
+        if (res && res.status === 200 && res.type === 'basic') {
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            try { cache.put(e.request, clone); } catch(err) {}
+          });
+        }
         return res;
       }).catch(() => cached);
     })
