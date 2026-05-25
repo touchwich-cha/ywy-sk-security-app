@@ -1,4 +1,4 @@
-const CACHE_NAME = 'security-ywy-v2';
+const CACHE_NAME = 'security-ywy-v3';
 const ASSETS = [
   '/',
   '/index.html',
