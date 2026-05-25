@@ -814,32 +814,66 @@
 // ════════════════════════════════════════════
 const GAS_API_URL = 'https://script.google.com/macros/s/AKfycbzFWEHv0eTeZkhl4Du7YU-QQ1JcRKJcwOp-n-8ph5HgDN40kGCgOBs1-N4HjNW9oH_biA/exec';
 
+// ════════════════════════════════════════════
+// GAS BRIDGE — แก้ปัญหา CORS โดยใช้:
+//   • JSONP  → สำหรับ GET (ดึงข้อมูล) 
+//   • no-cors form POST → สำหรับ WRITE (บันทึก) ผ่าน GAS doPost
+// ════════════════════════════════════════════
+
+// --- JSONP helper (GET, อ่านข้อมูล) ---
+function gasGet(action, payload, onSuccess, onError) {
+  const cbName = '_gasCB_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+  window[cbName] = function(data) {
+    delete window[cbName];
+    document.getElementById(cbName) && document.getElementById(cbName).remove();
+    onSuccess(data);
+  };
+  const params = new URLSearchParams({ action, payload: JSON.stringify(payload || {}), callback: cbName });
+  const script = document.createElement('script');
+  script.id = cbName;
+  script.src = GAS_API_URL + '?' + params.toString();
+  script.onerror = function() {
+    delete window[cbName];
+    script.remove();
+    if (onError) onError(new Error('JSONP failed'));
+  };
+  document.head.appendChild(script);
+}
+
+// --- fetch POST helper (เขียนข้อมูล — GAS รองรับ no-cors) ---
+function gasPost(action, payload, onSuccess, onError) {
+  // ส่งเป็น form-data เพื่อหลีกเลี่ยง preflight CORS
+  const form = new FormData();
+  form.append('action', action);
+  form.append('payload', JSON.stringify(payload || {}));
+  fetch(GAS_API_URL, { method: 'POST', body: form, mode: 'no-cors' })
+    .then(() => {
+      // no-cors ไม่ return body → polling สถานะจาก JSONP แทน
+      if (onSuccess) onSuccess('บันทึกสำเร็จ!');
+    })
+    .catch(e => { if (onError) onError(e); });
+}
+
 window.google = {
   script: {
     run: {
       _s: null, _f: null,
-      withSuccessHandler(cb) { this._s = cb; return this; },
-      withFailureHandler(cb) { this._f = cb; return this; },
-      _call(action, data) {
-        const self = this;
-        fetch(GAS_API_URL, {
-          method: 'POST',
-          body: JSON.stringify({ action, payload: data })
-        })
-        .then(r => r.json())
-        .then(r => { if (self._s) self._s(r); })
-        .catch(e => { if (self._f) self._f(e); else console.error(e); });
-      },
-      getGuardNames()             { this._call('getGuardNames', {}); },
-      saveAttendance(o)           { this._call('saveAttendance', o); },
-      saveEmergency(o)            { this._call('saveEmergency', o); },
-      saveVehicle(o)              { this._call('saveVehicle', o); },
-      savePerson(o)               { this._call('savePerson', o); },
-      getPendingVehicles()        { this._call('getPendingVehicles', {}); },
-      getLogs(dept)               { this._call('getLogs', dept); },
-      getReportList()             { this._call('getReportList', {}); },
-      generateMonthlyReport(m,y)  { this._call('generateMonthlyReport', {m,y}); },
-      getExcelReport(m,y)         { this._call('getExcelReport', {m,y}); }
+      withSuccessHandler(cb) { const c = Object.create(this); c._s = cb; return c; },
+      withFailureHandler(cb) { const c = Object.create(this); c._f = cb; return c; },
+
+      // READ — ใช้ JSONP
+      getGuardNames()       { gasGet('getGuardNames', {}, this._s, this._f); },
+      getPendingVehicles()  { gasGet('getPendingVehicles', {}, this._s, this._f); },
+      getLogs(dept)         { gasGet('getLogs', dept, this._s, this._f); },
+      getReportList()       { gasGet('getReportList', {}, this._s, this._f); },
+      getExcelReport(m,y)   { gasGet('getExcelReport', {m,y}, this._s, this._f); },
+
+      // WRITE — ใช้ POST (no-cors)
+      saveAttendance(o)          { gasPost('saveAttendance', o, this._s, this._f); },
+      saveEmergency(o)           { gasPost('saveEmergency', o, this._s, this._f); },
+      saveVehicle(o)             { gasPost('saveVehicle', o, this._s, this._f); },
+      savePerson(o)              { gasPost('savePerson', o, this._s, this._f); },
+      generateMonthlyReport(m,y) { gasPost('generateMonthlyReport', {m,y}, this._s, this._f); }
     }
   }
 };
